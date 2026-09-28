@@ -1,7 +1,42 @@
+import functools
 from typing import Annotated, Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
+from pydantic_core import ValidationError
+from pydantic_async_validation import AsyncValidationModelMixin, async_field_validator
+
+import api.exceptions as api_exceptions
+import api.score_types as score_types
+
+
+# Sentinel value used as a "unit" when the quantity refers to countable items
+# (e.g. "1 egg", "2 broccoli") rather than a measurable mass or volume.
+# It is deliberately distinct from any OFF taxonomy id (``en:...`` / ``xx:...``)
+# so it cannot be confused with a real unit.
+ITEM_UNIT = "item"
+
+
+def async_validate_model(fn):
+    """Decorator to run async validation on a Pydantic model before calling the function.
+
+    The decorated function must have the Pydantic model as first argument
+    and will be validated before
+    the function is called. If validation fails, a ``ValidationError`` is raised.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        for arg in list(args) + list(kwargs.values()):
+            if isinstance(arg, AsyncValidationModelMixin):
+                try:
+                    await arg.model_async_validate()
+                except ValidationError as e:
+                    # encapsulate so that we can use a specific exception handler
+                    raise api_exceptions.AsyncRequestValidationError(e.errors()) from e
+        return await fn(*args, **kwargs)
+
+    return wrapper
 
 
 class OFFIngredient(BaseModel):
@@ -11,10 +46,17 @@ class OFFIngredient(BaseModel):
     id: str
     text: str
     quantity: Optional[str] = None
+    quantity_ml: Optional[float] = None
     quantity_g: Optional[float] = None
     ecobalyse_code: Optional[str] = None
     ciqual_food_code: Optional[str] = None
     is_in_taxonomy: Optional[int] = None
+
+    @field_validator("quantity", mode="before")
+    def transform_id_to_str(cls, value) -> str:
+        """ensure that the quantity is always a string,
+        even if it is a number in the input"""
+        return str(value)
 
 
 class RecipeIngredient(BaseModel):
@@ -28,15 +70,21 @@ class RecipeIngredient(BaseModel):
                     "is_in_taxonomy": True,
                     "codified_ingredient": "apple",
                     "quantity_g": 150.0,
+                    "quantity_value": 0.15,
+                    "quantity_unit": "kg",
                 }
             ]
         }
     )
 
-    taxonomy_id: Optional[str] = None
-    is_in_taxonomy: bool
-    codified_ingredient: str
-    quantity_g: Optional[float] = None
+    taxonomy_id: Annotated[Optional[str], Field(description="Taxonomy id of the ingredient")] = None
+    is_in_taxonomy: Annotated[bool, Field(description="Whether the ingredient is in the taxonomy")]
+    codified_ingredient: Annotated[str, Field(description="Codified ingredient name")]
+    quantity_g: Annotated[Optional[float], Field(description="Quantity in grams")] = None
+    quantity_value: Annotated[
+        Optional[float], Field(description="Numeric value of the quantity")
+    ] = None
+    quantity_unit: Annotated[Optional[str], Field(description="Unit of the quantity")] = None
 
 
 class TaxonomyItem(BaseModel):
@@ -48,9 +96,7 @@ class TaxonomyItem(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"id": "en:apple", "label": "Apple", "synonyms": ["apples", "pommes"]}
-            ]
+            "examples": [{"id": "en:apple", "label": "Apple", "synonyms": ["apples", "pommes"]}]
         }
     )
 
@@ -71,9 +117,7 @@ class Origin(TaxonomyItem):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"id": "en:france", "label": "France", "synonyms": ["french"]}
-            ]
+            "examples": [{"id": "en:france", "label": "France", "synonyms": ["french"]}]
         }
     )
 
@@ -107,14 +151,21 @@ class RecipeParseResponse(BaseModel):
     ingredients: list[RecipeIngredient]
 
 
-class LangRequest(BaseModel):
+class LangRequest(AsyncValidationModelMixin, BaseModel):
     """Request model for parse_text endpoint"""
 
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"lang": "en"}]}
-    )
+    model_config = ConfigDict(json_schema_extra={"examples": [{"lang": "en"}]})
 
     lang: Annotated[str, Field(description="Language for the request (2 or 5 letter code)")]
+
+    @async_field_validator("lang")
+    async def check_language_code(self, value: str) -> str:
+        """Check if the language code is valid (exists in the OFF languages taxonomy)"""
+        import api.checks as checks
+
+        if not await checks.check_language_code(value):
+            raise ValueError(f"Language code {value} is not supported")
+        return value
 
 
 class TaxonomyRequest(LangRequest):
@@ -179,9 +230,7 @@ class Label(TaxonomyItem):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"id": "en:eu-organic", "label": "EU Organic", "synonyms": ["bio"]}
-            ]
+            "examples": [{"id": "en:eu-organic", "label": "EU Organic", "synonyms": ["bio"]}]
         }
     )
 
@@ -212,14 +261,56 @@ class LabelsResponse(BaseModel):
     labels: list[Label]
 
 
+class Country(TaxonomyItem):
+    """Country model for Score My Recipe API"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"id": "en:france", "label": "France", "synonyms": ["french"]}]
+        }
+    )
+
+    country_code: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description="ISO 3166-1 alpha-2 country code",
+        ),
+    ]
+
+
+class CountriesRequest(TaxonomyRequest):
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"lang": "en", "include_synonyms": False}]}
+    )
+    pass
+
+
+class CountriesResponse(BaseModel):
+    """Response model for get_countries endpoint"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "countries": [
+                        {"id": "en:france", "label": "France"},
+                        {"id": "en:spain", "label": "Spain"},
+                    ]
+                }
+            ]
+        }
+    )
+
+    countries: list[Country]
+
+
 class Ingredient(TaxonomyItem):
     """Ingredient model for Score My Recipe API"""
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"id": "en:apple", "label": "Apple", "synonyms": ["apples"]}
-            ]
+            "examples": [{"id": "en:apple", "label": "Apple", "synonyms": ["apples"]}]
         }
     )
 
@@ -250,6 +341,53 @@ class IngredientsResponse(BaseModel):
     ingredients: list[Ingredient]
 
 
+class Unit(TaxonomyItem):
+    """Unit model for Score My Recipe API"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"id": "en:gram", "label": "gram", "standard_unit": "g", "synonyms": ["g", "grams"]}
+            ]
+        }
+    )
+
+    standard_unit: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description="Standard unit the unit converts to (e.g. 'g', 'ml', 'kJ'). "
+            "Omitted when the taxonomy does not define one for this unit.",
+        ),
+    ]
+
+
+class UnitsRequest(TaxonomyRequest):
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"lang": "en", "include_synonyms": False}]}
+    )
+    pass
+
+
+class UnitsResponse(BaseModel):
+    """Response model for get_units endpoint"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "units": [
+                        {"id": "en:gram", "label": "gram", "standard_unit": "g"},
+                        {"id": "en:cup", "label": "cup", "standard_unit": "ml"},
+                    ]
+                }
+            ]
+        }
+    )
+
+    units: list[Unit]
+
+
 class ScoredIngredient(Ingredient):
     """An ingredient alternative with its matching Agribalyse row code.
 
@@ -274,8 +412,9 @@ class ScoredIngredient(Ingredient):
                 {"id": "en:apple", "label": "Apple", "agribalyse_code": "10001"},
                 {"id": "en:wheat-flour", "label": "Wheat flour", "agribalyseCode": "10602"},
             ]
-        }
+        },
     )
+
 
 class SuggestScoredIngredientRequest(TaxonomyRequest):
     """Request model for the suggest-scored-ingredient endpoint."""
@@ -286,9 +425,10 @@ class SuggestScoredIngredientRequest(TaxonomyRequest):
     ]
 
     model_config = ConfigDict(
-        json_schema_extra={"examples": [{"lang": "en", "include_synonyms": False, "taxonomy_id": "en:meat"}]}
+        json_schema_extra={
+            "examples": [{"lang": "en", "include_synonyms": False, "taxonomy_id": "en:meat"}]
+        }
     )
-
 
 
 class SuggestScoredIngredientResponse(BaseModel):
@@ -320,11 +460,7 @@ class TaxonomyItem(CamelModel):
     # json_schema_extra is merged with the inherited CamelModel config
     # (alias_generator + populate_by_name are preserved).
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {"id": "en:apple", "label": "Apple", "isInTaxonomy": True}
-            ]
-        }
+        json_schema_extra={"examples": [{"id": "en:apple", "label": "Apple", "isInTaxonomy": True}]}
     )
 
     id: Annotated[str, Field(description="Taxonomy identifier")]
@@ -356,7 +492,7 @@ class RecipeIngredientInput(CamelModel):
                             "isInTaxonomy": True,
                         }
                     ],
-                    "seasonality": False,
+                    "isInSeason": False,
                     "origin": {
                         "id": "en:france",
                         "label": "France",
@@ -378,7 +514,10 @@ class RecipeIngredientInput(CamelModel):
     labels: Annotated[
         list[TaxonomyItem], Field(description="Labels / certifications (organic, fair-trade...)")
     ] = []
-    seasonality: Annotated[bool, Field(description="Whether the ingredient is seasonal")] = False
+    is_fresh_plant: Annotated[
+        bool, Field(description="Whether the ingredient is a fresh plant")
+    ] = False
+    is_in_season: Annotated[bool, Field(description="Whether the ingredient is in season")] = False
     origin: Annotated[
         Optional[TaxonomyItem], Field(description="Origin country/region, null if unspecified")
     ] = None
@@ -397,6 +536,8 @@ class GreenScoreRequest(CamelModel):
         json_schema_extra={
             "examples": [
                 {
+                    "country": "FR",
+                    "accountedWeights": "scorable",
                     "ingredients": [
                         {
                             "id": "i1",
@@ -408,7 +549,7 @@ class GreenScoreRequest(CamelModel):
                                 "isInTaxonomy": True,
                             },
                             "labels": [],
-                            "seasonality": False,
+                            "isInSeason": False,
                             "origin": None,
                         },
                         {
@@ -421,16 +562,56 @@ class GreenScoreRequest(CamelModel):
                                 "isInTaxonomy": True,
                             },
                             "labels": [],
-                            "seasonality": False,
+                            "isInSeason": False,
                             "origin": None,
                         },
-                    ]
+                    ],
                 }
             ]
         }
     )
 
     ingredients: Annotated[RecipeInput, Field(description="The ingredients of the recipe")]
+
+    country: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description="Country code (ISO 3166-1 alpha-2) to compute the distance modifier for the recipe."
+            "If not provided, the distance will always be world",
+        ),
+    ] = None
+
+    accounted_weights: Annotated[
+        score_types.AccountedWeights,
+        Field(
+            default=score_types.AccountedWeights.ONLY_SCORABLE,
+            description=score_types.AccountedWeights.__doc__,
+        ),
+    ] = score_types.AccountedWeights.ONLY_SCORABLE
+
+    @field_validator("country", mode="before")
+    def upper_country_code(cls, value: Optional[str]) -> Optional[str]:
+        """Ensure the country code is uppercase (ISO 3166-1 alpha-2)
+
+        And is a 2-letter code if provided. If not, return None.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"Country code must be a string, got {type(value)}")
+        if len(value) != 2:
+            raise ValueError(f"Country code must be 2 letters, got {value}")
+        return value.upper()
+
+    @async_field_validator("country")
+    async def check_country_code(self, value: str) -> str:
+        """Check if the country code is valid (exists in the OFF countries taxonomy)"""
+        import api.checks as checks
+
+        if not await checks.check_country_code(value):
+            raise ValueError(f"Country code {value} is not supported")
+        return value
 
 
 class IngredientAgribalyse(CamelModel):
@@ -489,6 +670,36 @@ class GreenScoreResponse(CamelModel):
         }
     )
 
+    global_ef_score: Annotated[
+        Optional[float],
+        Field(
+            description="The computed global EF score of the recipe, null if no ingredients have a score"
+        ),
+    ] = None
+    labels_bonus: Annotated[
+        Optional[float],
+        Field(
+            description="The bonus from ingredient labels, null if no ingredients have a score, 0 if no labels"
+        ),
+    ] = None
+    epi_modifier: Annotated[
+        Optional[float],
+        Field(
+            description="The modifier from ingredient origin agricultural system (EPI), null if no ingredients have a score"
+        ),
+    ] = None
+    distances_modifier: Annotated[
+        Optional[float],
+        Field(
+            description="The modifier from ingredient origin distance, null if no ingredients have a score"
+        ),
+    ] = None
+    seasonality_modifier: Annotated[
+        Optional[float],
+        Field(
+            description="The modifier from ingredient seasonality, null if no ingredients have a score"
+        ),
+    ] = None
     numeric_score: Annotated[
         Optional[float],
         Field(
@@ -507,3 +718,82 @@ class GreenScoreResponse(CamelModel):
             description="List of ingredient ids that were missing from the Agribalyse computation"
         ),
     ] = []
+    notes: Annotated[
+        Optional[list[str]],
+        Field(
+            description="Notes about the recipe-level score computation "
+            "(e.g. seasonality), null when no ingredients have a score"
+        ),
+    ] = None
+    ingredients_notes: Annotated[
+        Optional[dict[str, list[str]]],
+        Field(
+            description="Per-ingredient notes keyed by ingredient id, "
+            "only entries with at least one note are included, "
+            "null if no ingredients have a score"
+        ),
+    ] = None
+
+
+class RecomputeQuantityRequest(LangRequest, CamelModel):
+    """Request body for the ``POST /v1/recompute-quantity`` endpoint.
+
+    Each unit (``old_unit`` / ``new_unit``) may be given either as a unit id
+    from the OFF units taxonomy (e.g. ``xx:kg``), as a localized unit name
+    resolvable through the units taxonomy (e.g. ``"kg"``, ``"tasse"``), or as
+    the ``item`` sentinel for countable ingredients (e.g. "1 egg").
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "lang": "en",
+                    "quantity_g": 2000,
+                    "old_value": 2000,
+                    "old_unit": "g",
+                    "new_value": 2,
+                    "new_unit": "kg",
+                }
+            ]
+        }
+    )
+
+    quantity_g: Annotated[float, Field(ge=0, description="Previous quantity in grams")]
+    old_value: Annotated[float, Field(ge=0, description="Previous numeric value of the quantity")]
+    old_unit: Annotated[
+        str, Field(description=f"Previous unit (unit name, taxonomy id or '{ITEM_UNIT}')")
+    ]
+    new_value: Annotated[float, Field(ge=0, description="New numeric value of the quantity")]
+    new_unit: Annotated[
+        str, Field(description=f"New unit (unit name, taxonomy id or '{ITEM_UNIT}')")
+    ]
+    # lang: Annotated[
+    #     str,
+    #     Field(
+    #         description="Language code (2 or 5 letters) "
+    #         "used to resolve unit names to their taxonomy id."
+    #     ),
+    # ]
+
+
+class RecomputeQuantityResponse(CamelModel):
+    """Response model for the ``POST /v1/recompute-quantity`` endpoint.
+
+    The ``unit`` field echoes the ``new_unit`` sent in the request (it may be a
+    unit name, a taxonomy id or ``{ITEM_UNIT}``).
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"quantityG": 2000, "value": 2, "unit": "kg"}]}
+    )
+
+    quantity_g: Annotated[float, Field(description="New quantity in grams")]
+    value: Annotated[float, Field(description="New numeric value of the quantity")]
+    unit: Annotated[
+        str,
+        Field(
+            description="New unit, echoed from the request "
+            f"(unit name, taxonomy id or '{ITEM_UNIT}')"
+        ),
+    ]
