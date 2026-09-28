@@ -266,9 +266,9 @@ export interface components {
 		 *             "label": "Apple"
 		 *           },
 		 *           "id": "i1",
+		 *           "isInSeason": false,
 		 *           "labels": [],
 		 *           "name": "apple",
-		 *           "seasonality": false,
 		 *           "weight": 150
 		 *         },
 		 *         {
@@ -278,9 +278,9 @@ export interface components {
 		 *             "label": "Wheat flour"
 		 *           },
 		 *           "id": "i2",
+		 *           "isInSeason": false,
 		 *           "labels": [],
 		 *           "name": "wheat flour",
-		 *           "seasonality": false,
 		 *           "weight": 200
 		 *         }
 		 *       ]
@@ -337,6 +337,11 @@ export interface components {
 			 */
 			distancesModifier?: number | null;
 			/**
+			 * Seasonalitymodifier
+			 * @description The modifier from ingredient seasonality, null if no ingredients have a score
+			 */
+			seasonalityModifier?: number | null;
+			/**
 			 * Numericscore
 			 * @description The computed green-score of the recipe, null if no ingredients have a score
 			 */
@@ -352,6 +357,18 @@ export interface components {
 			 * @default []
 			 */
 			missingIngredientIds: string[];
+			/**
+			 * Notes
+			 * @description Notes about the recipe-level score computation (e.g. seasonality), null when no ingredients have a score
+			 */
+			notes?: string[] | null;
+			/**
+			 * Ingredientsnotes
+			 * @description Per-ingredient notes keyed by ingredient id, only entries with at least one note are included, null if no ingredients have a score
+			 */
+			ingredientsNotes?: {
+				[key: string]: string[];
+			} | null;
 		};
 		/** HTTPValidationError */
 		HTTPValidationError: {
@@ -538,6 +555,7 @@ export interface components {
 		 *         "label": "Apple"
 		 *       },
 		 *       "id": "i1",
+		 *       "isInSeason": false,
 		 *       "labels": [
 		 *         {
 		 *           "id": "en:eu-organic",
@@ -551,7 +569,6 @@ export interface components {
 		 *         "isInTaxonomy": true,
 		 *         "label": "France"
 		 *       },
-		 *       "seasonality": false,
 		 *       "weight": 150
 		 *     }
 		 */
@@ -580,11 +597,17 @@ export interface components {
 			 */
 			labels: components['schemas']['TaxonomyItem'][];
 			/**
-			 * Seasonality
-			 * @description Whether the ingredient is seasonal
+			 * Isfreshplant
+			 * @description Whether the ingredient is a fresh plant
 			 * @default false
 			 */
-			seasonality: boolean;
+			isFreshPlant: boolean;
+			/**
+			 * Isinseason
+			 * @description Whether the ingredient is in season
+			 * @default false
+			 */
+			isInSeason: boolean;
 			/** @description Origin country/region, null if unspecified */
 			origin?: components['schemas']['TaxonomyItem'] | null;
 		};

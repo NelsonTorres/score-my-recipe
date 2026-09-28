@@ -551,9 +551,9 @@
                   "label": "Apple"
                 },
                 "id": "i1",
+                "isInSeason": false,
                 "labels": [],
                 "name": "apple",
-                "seasonality": false,
                 "weight": 150
               },
               {
@@ -563,9 +563,9 @@
                   "label": "Wheat flour"
                 },
                 "id": "i2",
+                "isInSeason": false,
                 "labels": [],
                 "name": "wheat flour",
-                "seasonality": false,
                 "weight": 200
               }
             ]
@@ -622,6 +622,18 @@
             "title": "Distancesmodifier",
             "description": "The modifier from ingredient origin distance, null if no ingredients have a score"
           },
+          "seasonalityModifier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seasonalitymodifier",
+            "description": "The modifier from ingredient seasonality, null if no ingredients have a score"
+          },
           "numericScore": {
             "anyOf": [
               {
@@ -654,6 +666,39 @@
             "title": "Missingingredientids",
             "description": "List of ingredient ids that were missing from the Agribalyse computation",
             "default": []
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes",
+            "description": "Notes about the recipe-level score computation (e.g. seasonality), null when no ingredients have a score"
+          },
+          "ingredientsNotes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingredientsnotes",
+            "description": "Per-ingredient notes keyed by ingredient id, only entries with at least one note are included, null if no ingredients have a score"
           }
         },
         "type": "object",
@@ -993,10 +1038,16 @@
             "description": "Labels / certifications (organic, fair-trade...)",
             "default": []
           },
-          "seasonality": {
+          "isFreshPlant": {
             "type": "boolean",
-            "title": "Seasonality",
-            "description": "Whether the ingredient is seasonal",
+            "title": "Isfreshplant",
+            "description": "Whether the ingredient is a fresh plant",
+            "default": false
+          },
+          "isInSeason": {
+            "type": "boolean",
+            "title": "Isinseason",
+            "description": "Whether the ingredient is in season",
             "default": false
           },
           "origin": {
@@ -1028,6 +1079,7 @@
               "label": "Apple"
             },
             "id": "i1",
+            "isInSeason": false,
             "labels": [
               {
                 "id": "en:eu-organic",
@@ -1041,7 +1093,6 @@
               "isInTaxonomy": true,
               "label": "France"
             },
-            "seasonality": false,
             "weight": 150
           }
         ]
