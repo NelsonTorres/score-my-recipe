@@ -7,7 +7,7 @@
  *
  * It also exports functions from svelte-i18n, like the translate function (aka `_`)
  */
-import { init, register, getLocaleFromNavigator, isLoading } from 'svelte-i18n';
+import { init, register, getLocaleFromNavigator } from 'svelte-i18n';
 import { browser } from '$app/environment';
 import countries from './countries.json';
 
@@ -54,5 +54,7 @@ export function getBrowserLocale() {
 	return navLang || FALLBACK_LOCALE;
 }
 
-export { isLoading, AVAILABLE_LOCALES };
-export * from 'svelte-i18n';
+// Explicitly re-export the svelte-i18n helpers used elsewhere in the app
+// waitLocale and isLoading are used to wait for translations files to be ready
+export { isLoading, locale, waitLocale, _ } from 'svelte-i18n';
+export { AVAILABLE_LOCALES };
