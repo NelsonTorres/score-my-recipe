@@ -292,3 +292,24 @@ async def suggest_scored_ingredient(
         )
         for ingredient_id, ingredient_label, ingredient_synonyms, _ in labels
     ]
+
+
+async def warmup(lang: str) -> None:
+    """Pre-populate the per-language taxonomy views for ``lang``.
+
+    Each view (origins, labels, countries, ingredients) is memoized per language
+    code, so warming them removes the first-request latency for that language.
+    The four calls are independent of each other and run concurrently.
+    """
+    # Lazy import breaks the otherwise circular dependency with api.warmup.
+    from api.warmup import gather_warmup
+
+    await gather_warmup(
+        lang,
+        {
+            "recipes._get_origins_entries": _get_origins_entries(lang),
+            "recipes._get_labels_entries": _get_labels_entries(lang),
+            "recipes.get_countries_entries": get_countries_entries(lang),
+            "recipes._get_ingredients_entries": _get_ingredients_entries(lang),
+        },
+    )
