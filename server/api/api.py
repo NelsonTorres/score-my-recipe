@@ -15,6 +15,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import api.logging_config as logging_config
 import api.recipes as recipes
 import api.exceptions as exceptions
 import api.score as score
@@ -28,14 +29,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: schedule cache warmup in the background if configured.
-
-    The ``SCORE_MY_RECIPE_WARMUP`` setting holds a comma-separated list of
-    language codes. When set, caches are pre-populated for those languages so the
-    first user does not pay the cold-cache latency. Warmup runs as a background
-    task (the server starts serving immediately) and is best-effort: a failing
-    call is logged and does not block startup.
+    """Startup:
+    * configure logs
+    * warmup cache if settings.warmup is a non-empty list of language codes
     """
+    logging_config.setup_logging()
     settings = get_settings()
     task = None
     if settings.warmup:
