@@ -72,6 +72,8 @@
 		"country_load_error": "Kon landen niet laden",
 		"ingredient_not_accounted": "Niet meegeteld",
 		"ingredient_not_accounted_tooltip": "We hebben geen overeenkomst gevonden in onze impactdatabase voor dit ingrediënt",
+		"ingredient_zero_quantity": "Zero quantity",
+		"ingredient_zero_quantity_tooltip": "This ingredient's quantity is 0g, so it cannot be taken into account in the calculation.",
 		"ingredient_scorable": "Dit ingrediënt kan worden meegeteld in de Green-Score"
 	},
 	"homepage": {

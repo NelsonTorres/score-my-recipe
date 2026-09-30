@@ -72,6 +72,8 @@
 		"country_load_error": "Impossible de charger les pays",
 		"ingredient_not_accounted": "Non comptabilisé",
 		"ingredient_not_accounted_tooltip": "Nous n'avons pas trouvé de correspondance dans notre base de données d'impact pour cet ingrédient",
+		"ingredient_zero_quantity": "Zero quantity",
+		"ingredient_zero_quantity_tooltip": "This ingredient's quantity is 0g, so it cannot be taken into account in the calculation.",
 		"ingredient_scorable": "Cet ingrédient peut être comptabilisé dans le green-score"
 	},
 	"homepage": {
